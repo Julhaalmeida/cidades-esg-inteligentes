@@ -70,7 +70,7 @@ info:
 app:
   nome: Cidades ESG Inteligentes
   ambiente: ${APP_ENV:local}
-  # no Render, RENDER_GIT_COMMIT é preenchido automaticamente; na imagem Docker, APP_COMMIT vem do build
+  # APP_COMMIT é gravado na imagem durante o build (veja o Dockerfile)
   commit: ${RENDER_GIT_COMMIT:${APP_COMMIT:local}}
   pesos:
     ambiental: 0.4

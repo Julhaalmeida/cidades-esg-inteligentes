@@ -1,14 +1,17 @@
 # 🌎 Projeto - Cidades ESG Inteligentes
 
+[![CI/CD](https://github.com/Julhaalmeida/cidades-esg-inteligentes/actions/workflows/ci-cd.yml/badge.svg)](https://github.com/Julhaalmeida/cidades-esg-inteligentes/actions/workflows/ci-cd.yml)
+
 API REST em **Java 21 + Spring Boot 4.1** que reúne indicadores **ambientais, sociais e de governança (ESG)** de cidades brasileiras, calcula um **score ESG de 0 a 100** e gera um **ranking**. O projeto aplica práticas completas de DevOps: **pipeline CI/CD no GitHub Actions**, **containerização com Docker**, **orquestração com Docker Compose** e **deploy automatizado em staging e produção** no Render.
 
 | | |
 |---|---|
 | **Integrantes** | Julha Almeida Araujo (RM 562697) · Walter Seixas Nogueira (RM 565533) |
-| **Repositório** | `https://github.com/[PREENCHER]/[PREENCHER]` |
-| **Staging** | `https://[PREENCHER].onrender.com` |
-| **Produção** | `https://[PREENCHER].onrender.com` |
-| **Swagger** | `<url-do-ambiente>/swagger-ui.html` |
+| **Repositório** | https://github.com/Julhaalmeida/cidades-esg-inteligentes |
+| **Staging** | https://cidades-esg-staging.onrender.com |
+| **Produção** | https://cidades-esg-production.onrender.com |
+| **Swagger** | [staging](https://cidades-esg-staging.onrender.com/swagger-ui.html) · [produção](https://cidades-esg-production.onrender.com/swagger-ui.html) |
+| **Documentação técnica** | [PPT](docs/Documentacao-Tecnica-Cidades-ESG.pptx) · [PDF](docs/Documentacao-Tecnica-Cidades-ESG.pdf) |
 
 > ℹ️ Os ambientes usam o plano gratuito do Render: depois de 15 minutos sem acesso o serviço "dorme" e o primeiro acesso leva cerca de 1 minuto para responder.
 
@@ -160,7 +163,7 @@ flowchart LR
 **Como o pipeline funciona:**
 
 - **Gatilhos:** em *pull request* para a `main` rodam Build, Testes e Docker (validação sem deploy). Em *push* na `main` ou execução manual (*Run workflow*) roda o fluxo completo.
-- **Verificação do deploy:** o script [`scripts/render-deploy.sh`](scripts/render-deploy.sh) só considera o deploy concluído quando a aplicação responde em `/api/info` com o commit do pipeline. Enquanto o Render constrói a nova versão, a anterior continua no ar (deploy sem indisponibilidade, graças ao health check `/actuator/health/readiness`).
+- **Verificação do deploy:** o script [`scripts/render-deploy.sh`](scripts/render-deploy.sh) só considera o deploy concluído quando a aplicação responde em `/api/info` com o commit do pipeline (se a imagem não informar o commit, aceita a troca de instância e deixa um aviso na execução). Enquanto o Render constrói a nova versão, a anterior continua no ar (deploy sem indisponibilidade, graças ao health check `/actuator/health/readiness`).
 - **Smoke tests:** [`scripts/smoke-test.sh`](scripts/smoke-test.sh) confere health check, readiness (com banco), ambiente correto, ranking, catálogo, OpenAPI e página inicial. Em CI e staging também cadastra, pontua e remove uma cidade de teste.
 - **Segredos:** os deploy hooks ficam em **GitHub Secrets** e as URLs em **GitHub Variables**; nada sensível fica no código. A senha do banco no Render é injetada pela própria plataforma (`render.yaml`).
 - **Ambientes do GitHub:** os jobs de deploy usam os *environments* `staging` e `production`, que guardam o histórico de deploys e mostram o link do ambiente no grafo da execução.
@@ -219,11 +222,14 @@ COPY --from=build --chown=app:app /workspace/extracted/spring-boot-loader/ ./
 COPY --from=build --chown=app:app /workspace/extracted/snapshot-dependencies/ ./
 COPY --from=build --chown=app:app /workspace/extracted/application/ ./
 
-# Commit gravado na imagem (exibido em /api/info). No Render, RENDER_GIT_COMMIT tem prioridade.
+# Commit gravado na imagem e exibido em /api/info (o pipeline usa para confirmar cada deploy):
+# - no Render, chega pelo build arg RENDER_GIT_COMMIT (o Render só repassa variáveis aos ARGs declarados);
+# - no GitHub Actions, chega pelo build arg GIT_COMMIT.
 ARG GIT_COMMIT=local
+ARG RENDER_GIT_COMMIT
 # JVM ajustada para containers pequenos (o plano gratuito do Render tem 512 MB e 0,1 CPU):
 # heap limitada a 60% da memória do container, GC serial e só o compilador C1 (inicialização mais rápida).
-ENV APP_COMMIT=${GIT_COMMIT} \
+ENV APP_COMMIT=${RENDER_GIT_COMMIT:-${GIT_COMMIT}} \
     PORT=8080 \
     JAVA_OPTS="-XX:MaxRAMPercentage=60 -XX:+UseSerialGC -XX:TieredStopAtLevel=1 -Xss512k -XX:+ExitOnOutOfMemoryError"
 
@@ -314,6 +320,14 @@ Feito uma única vez. Depois disso, cada push na `main` publica em staging e, ap
    | Variable | `STAGING_URL` | URL pública de staging |
    | Variable | `PRODUCTION_URL` | URL pública de produção |
 
+   Também dá para cadastrar pelo terminal, com o [GitHub CLI](https://cli.github.com) (`gh auth login` antes):
+   ```bash
+   gh secret set RENDER_DEPLOY_HOOK_STAGING        # cole o deploy hook quando pedir (fica oculto)
+   gh secret set RENDER_DEPLOY_HOOK_PRODUCTION
+   gh variable set STAGING_URL    --body "https://cidades-esg-staging.onrender.com"
+   gh variable set PRODUCTION_URL --body "https://cidades-esg-production.onrender.com"
+   ```
+
 6. **Exija aprovação para produção (recomendado):** *Settings > Environments > production > Required reviewers*, adicione um integrante e salve. (Os ambientes `staging` e `production` são criados pelo próprio pipeline; se não aparecerem, crie com *New environment*.)
 7. **Rode o pipeline:** *Actions > CI/CD > Run workflow* (ou faça um novo push). Quando o job de produção pedir, clique em *Review deployments > Approve and deploy*.
 
@@ -323,27 +337,41 @@ Feito uma única vez. Depois disso, cada push na `main` publica em staging e, ap
 
 ## 📸 Prints do funcionamento
 
-> Substitua cada imagem de `docs/prints/` por um print real **com o mesmo nome de arquivo**; o README e a documentação passam a mostrar os prints automaticamente.
+Prints da [execução #3](https://github.com/Julhaalmeida/cidades-esg-inteligentes/actions/runs/37963798823) do pipeline, em 09/10/2026: o commit `6677280` passou por build, testes e Docker, foi publicado em staging e, depois da aprovação, em produção. Clique em uma imagem para ver no tamanho original.
 
 ### Pipeline (build, testes e deploy)
 
-| Pipeline completo | Build |
+| Pipeline completo (execução #3) | Build |
 |---|---|
-| ![Pipeline completo no GitHub Actions](docs/prints/01-pipeline-visao-geral.png) | ![Job de build](docs/prints/02-build.png) |
-| **Testes automatizados** | **Docker + Compose no CI** |
-| ![Relatório de testes](docs/prints/03-testes.png) | ![Job Docker](docs/prints/04-docker.png) |
+| ![Grafo da execução #3 no GitHub Actions com os cinco jobs concluídos](docs/prints/01-pipeline-visao-geral.png) | ![Passos do job Build concluídos](docs/prints/02-build.png) |
+| **Testes automatizados** | **Docker: imagem, Compose, smoke tests e GHCR** |
+| ![Passos do job Testes: testes unitários e de integração, relatório e cobertura](docs/prints/03-testes.png) | ![Passos do job Docker concluídos](docs/prints/04-docker.png) |
 | **Deploy em staging** | **Aprovação para produção** |
-| ![Deploy em staging](docs/prints/05-deploy-staging.png) | ![Aprovação para produção](docs/prints/06-aprovacao-producao.png) |
+| ![Job Deploy Staging: deploy no Render e smoke tests](docs/prints/05-deploy-staging.png) | ![Janela de revisão do ambiente production](docs/prints/06-aprovacao-producao.png) |
 | **Deploy em produção** | **Imagem publicada no GHCR** |
-| ![Deploy em produção](docs/prints/07-deploy-producao.png) | ![Imagem no GHCR](docs/prints/12-imagem-ghcr.png) |
+| ![Job Deploy Produção: deploy no Render e smoke tests](docs/prints/07-deploy-producao.png) | ![Pacote no GitHub Container Registry com as tags latest e sha-6677280](docs/prints/12-imagem-ghcr.png) |
 
 ### Ambientes funcionando
 
-| Staging | Produção |
+| Staging (faixa amarela) | Produção (faixa verde) |
 |---|---|
-| ![Staging no ar](docs/prints/08-staging-no-ar.png) | ![Produção no ar](docs/prints/09-producao-no-ar.png) |
-| **Serviços no Render** | **Execução local com Docker Compose** |
-| ![Painel do Render](docs/prints/10-render-servicos.png) | ![docker compose ps](docs/prints/11-docker-compose-local.png) |
+| ![Página inicial de staging com versão 1.0.0 e commit 6677280](docs/prints/08-staging-no-ar.png) | ![Página inicial de produção com o mesmo commit 6677280](docs/prints/09-producao-no-ar.png) |
+| **Serviços no Render** | **Docker Compose no pipeline** |
+| ![Painel do Render com os serviços de staging e produção e o banco](docs/prints/10-render-servicos.png) | ![Log do docker compose up: redes, volumes e containers saudáveis](docs/prints/11-docker-compose.png) |
+
+Saída do passo *"Subir aplicação + PostgreSQL com Docker Compose"* do job Docker (trecho):
+
+```
+ Network cidades-esg_backend  Created
+ Network cidades-esg_frontend  Created
+ Volume "cidades-esg_app-logs"  Created
+ Volume "cidades-esg_pgdata"  Created
+ Container cidades-esg-db-1  Healthy
+ Container cidades-esg-app-1  Healthy
+NAME                IMAGE                         COMMAND                  SERVICE   CREATED          STATUS                    PORTS
+cidades-esg-app-1   cidades-esg-inteligentes:ci   "sh -c 'exec java $J…"   app       11 seconds ago   Up 5 seconds (healthy)    0.0.0.0:8080->8080/tcp, [::]:8080->8080/tcp
+cidades-esg-db-1    postgres:17-alpine            "docker-entrypoint.s…"   db        11 seconds ago   Up 11 seconds (healthy)
+```
 
 ---
 
@@ -372,7 +400,7 @@ cidades-esg-inteligentes/
 ├── .env.example                    # modelo de variáveis de ambiente
 ├── envs/                           # variáveis para simular staging e produção localmente
 ├── scripts/                        # render-deploy.sh e smoke-test.sh
-├── docs/                           # documentação técnica (PPT) e prints
+├── docs/                           # documentação técnica (PPT e PDF) e prints
 ├── src/main/java/br/com/fiap/cidadesesg/
 │   ├── config/                     # propriedades, OpenAPI, log de inicialização
 │   ├── domain/                     # entidades e catálogo de indicadores
@@ -398,6 +426,7 @@ cidades-esg-inteligentes/
 | O plano gratuito do Render permite **apenas 1 PostgreSQL** por conta, mas precisávamos de staging e produção isolados. | Cada ambiente usa um **schema próprio** (`DB_SCHEMA`) no mesmo banco. O Flyway cria e migra o schema de cada ambiente separadamente. |
 | Garantir que **produção recebe exatamente o que foi testado** em staging. | O pipeline envia o mesmo commit (`ref=<sha>`) para os dois deploy hooks e só segue quando `/api/info` responde com esse commit. |
 | Saber se o deploy **terminou de verdade** (o Render responde ao hook na hora, mas o build leva minutos). | Script de deploy que consulta `/api/info` até o commit novo aparecer, com tempo limite e mensagem de erro clara. |
+| No primeiro deploy, o `/api/info` do Render mostrava o commit `local`: em serviços Docker, o Render não injeta o `RENDER_GIT_COMMIT` na aplicação em execução. | O Dockerfile passou a declarar `ARG RENDER_GIT_COMMIT` (o Render só repassa variáveis aos ARGs declarados) e grava o valor na imagem. Na execução seguinte, staging e produção já mostraram o commit `6677280`. O script de deploy também aceita a troca de instância como confirmação, se o commit não vier. |
 | Spring Boot em **512 MB de RAM e 0,1 CPU** (plano gratuito). | JVM ajustada para container (heap a 60%, GC serial, compilador C1), pool de conexões pequeno e imagem JRE Alpine. |
 | Testar com o **mesmo banco de produção** (PostgreSQL), não com banco em memória. | Testes de integração com PostgreSQL real no GitHub Actions (*service container*) e smoke tests com Docker Compose no CI. |
 | **Segredos** fora do código. | GitHub Secrets/Variables no pipeline, `.env` local fora do Git (com `.env.example` de modelo) e credenciais do banco injetadas pelo Render. |
