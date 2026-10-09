@@ -43,11 +43,14 @@ COPY --from=build --chown=app:app /workspace/extracted/spring-boot-loader/ ./
 COPY --from=build --chown=app:app /workspace/extracted/snapshot-dependencies/ ./
 COPY --from=build --chown=app:app /workspace/extracted/application/ ./
 
-# Commit gravado na imagem (exibido em /api/info). No Render, RENDER_GIT_COMMIT tem prioridade.
+# Commit gravado na imagem e exibido em /api/info (o pipeline usa para confirmar cada deploy):
+# - no Render, chega pelo build arg RENDER_GIT_COMMIT (o Render só repassa variáveis aos ARGs declarados);
+# - no GitHub Actions, chega pelo build arg GIT_COMMIT.
 ARG GIT_COMMIT=local
+ARG RENDER_GIT_COMMIT
 # JVM ajustada para containers pequenos (o plano gratuito do Render tem 512 MB e 0,1 CPU):
 # heap limitada a 60% da memória do container, GC serial e só o compilador C1 (inicialização mais rápida).
-ENV APP_COMMIT=${GIT_COMMIT} \
+ENV APP_COMMIT=${RENDER_GIT_COMMIT:-${GIT_COMMIT}} \
     PORT=8080 \
     JAVA_OPTS="-XX:MaxRAMPercentage=60 -XX:+UseSerialGC -XX:TieredStopAtLevel=1 -Xss512k -XX:+ExitOnOutOfMemoryError"
 
