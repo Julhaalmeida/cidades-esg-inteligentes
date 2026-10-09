@@ -1,0 +1,95 @@
+# =============================================================================
+# Orquestração local: aplicação + PostgreSQL (+ Adminer opcional)
+#
+#   cp .env.example .env              # 1x: cria o arquivo de variáveis
+#   docker compose up -d --build      # sobe tudo
+#   docker compose --profile tools up -d   # sobe também o Adminer (gestão do banco)
+#   docker compose down               # para (os dados ficam no volume)
+#   docker compose down -v            # para e APAGA os dados
+#
+# Para simular staging e produção lado a lado na mesma máquina:
+#   docker compose -p cidades-esg-staging    --env-file .env --env-file envs/staging.env    up -d --build
+#   docker compose -p cidades-esg-production --env-file .env --env-file envs/production.env up -d --build
+# =============================================================================
+name: cidades-esg
+
+services:
+
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME:-cidades_esg}
+      POSTGRES_USER: ${DB_USER:-esg}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Defina DB_PASSWORD no arquivo .env (copie o .env.example)}
+    volumes:
+      - pgdata:/var/lib/postgresql/data      # dados persistem entre reinícios
+    networks:
+      - backend                              # banco isolado: sem porta exposta ao host
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        GIT_COMMIT: ${GIT_COMMIT:-local}
+    image: ${APP_IMAGE:-cidades-esg-inteligentes:local}
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy           # só sobe depois que o banco aceita conexões
+    environment:
+      APP_ENV: ${APP_ENV:-local}
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-default}
+      DB_HOST: db                            # nome do serviço na rede "backend"
+      DB_PORT: "5432"
+      DB_NAME: ${DB_NAME:-cidades_esg}
+      DB_USER: ${DB_USER:-esg}
+      DB_PASSWORD: ${DB_PASSWORD:?Defina DB_PASSWORD no arquivo .env (copie o .env.example)}
+      DB_SCHEMA: ${DB_SCHEMA:-public}
+      LOG_LEVEL_APP: ${LOG_LEVEL_APP:-INFO}
+      SWAGGER_ENABLED: ${SWAGGER_ENABLED:-true}
+      LOG_FILE: /app/logs/cidades-esg.log    # gravado no volume app-logs
+    ports:
+      - "${APP_PORT:-8080}:8080"
+    volumes:
+      - app-logs:/app/logs
+    networks:
+      - frontend
+      - backend
+    healthcheck:
+      # readiness inclui o banco: "docker compose up --wait" só termina com tudo pronto
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/actuator/health/readiness || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+
+  adminer:
+    image: adminer:5
+    profiles: ["tools"]                      # opcional: docker compose --profile tools up -d
+    restart: unless-stopped
+    depends_on:
+      - db
+    environment:
+      ADMINER_DEFAULT_SERVER: db
+    ports:
+      - "${ADMINER_PORT:-8090}:8080"
+    networks:
+      - frontend
+      - backend
+
+volumes:
+  pgdata:
+  app-logs:
+
+networks:
+  frontend:                                  # rede com acesso externo (portas publicadas)
+  backend:
+    internal: true                           # rede interna: sem saída para a internet

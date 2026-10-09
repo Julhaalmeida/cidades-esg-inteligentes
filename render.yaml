@@ -1,0 +1,105 @@
+# =============================================================================
+# Blueprint do Render: infraestrutura como código dos ambientes STAGING e PRODUÇÃO.
+#
+# Cria 1 PostgreSQL gratuito e 2 serviços web Docker (plano free). O plano free do
+# Render permite apenas 1 banco gratuito por conta, então cada ambiente usa um
+# SCHEMA próprio nesse banco (DB_SCHEMA), totalmente isolado do outro.
+#
+# O deploy NÃO acontece a cada push (autoDeployTrigger: off): quem dispara é o
+# pipeline do GitHub Actions, via deploy hook, depois que build, testes e a
+# validação da imagem passaram. Assim staging e produção recebem o mesmo commit.
+#
+# Como usar: Render > New > Blueprint > selecione este repositório > Apply.
+# =============================================================================
+
+databases:
+  - name: cidades-esg-db
+    plan: free
+    region: virginia
+    databaseName: cidades_esg
+    user: cidades_esg
+    postgresMajorVersion: "17"
+    ipAllowList: []            # sem acesso pela internet: só os serviços do Render conectam
+
+services:
+  # ------------------------------- STAGING -------------------------------
+  - type: web
+    name: cidades-esg-staging
+    runtime: docker
+    plan: free
+    region: virginia
+    branch: main
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /actuator/health/readiness
+    autoDeployTrigger: "off"
+    envVars:
+      - key: APP_ENV
+        value: staging
+      - key: SPRING_PROFILES_ACTIVE
+        value: staging
+      - key: PORT
+        value: "8080"
+      - key: DB_SCHEMA
+        value: staging
+      - key: DB_HOST
+        fromDatabase:
+          name: cidades-esg-db
+          property: host
+      - key: DB_PORT
+        fromDatabase:
+          name: cidades-esg-db
+          property: port
+      - key: DB_NAME
+        fromDatabase:
+          name: cidades-esg-db
+          property: database
+      - key: DB_USER
+        fromDatabase:
+          name: cidades-esg-db
+          property: user
+      - key: DB_PASSWORD
+        fromDatabase:
+          name: cidades-esg-db
+          property: password
+
+  # ------------------------------- PRODUÇÃO -------------------------------
+  - type: web
+    name: cidades-esg-production
+    runtime: docker
+    plan: free
+    region: virginia
+    branch: main
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /actuator/health/readiness
+    autoDeployTrigger: "off"
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: SPRING_PROFILES_ACTIVE
+        value: production
+      - key: PORT
+        value: "8080"
+      - key: DB_SCHEMA
+        value: production
+      - key: DB_HOST
+        fromDatabase:
+          name: cidades-esg-db
+          property: host
+      - key: DB_PORT
+        fromDatabase:
+          name: cidades-esg-db
+          property: port
+      - key: DB_NAME
+        fromDatabase:
+          name: cidades-esg-db
+          property: database
+      - key: DB_USER
+        fromDatabase:
+          name: cidades-esg-db
+          property: user
+      - key: DB_PASSWORD
+        fromDatabase:
+          name: cidades-esg-db
+          property: password

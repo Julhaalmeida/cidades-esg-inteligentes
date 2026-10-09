@@ -1,0 +1,96 @@
+# =============================================================================
+# Configuração base. Tudo que muda entre ambientes vem de VARIÁVEIS DE AMBIENTE
+# (com valores padrão para desenvolvimento local), seguindo o 12-Factor App.
+# Ajustes específicos ficam em application-staging.yml e application-production.yml.
+# =============================================================================
+spring:
+  application:
+    name: cidades-esg-inteligentes
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:cidades_esg}?currentSchema=${DB_SCHEMA:public}
+    username: ${DB_USER:esg}
+    password: ${DB_PASSWORD:esg}
+    hikari:
+      maximum-pool-size: ${DB_POOL_SIZE:5}
+      minimum-idle: 1
+      connection-timeout: 20000
+  jpa:
+    open-in-view: false
+    hibernate:
+      # o esquema do banco é responsabilidade do Flyway (src/main/resources/db/migration)
+      ddl-auto: none
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+  flyway:
+    # cada ambiente pode usar um schema próprio no mesmo banco (DB_SCHEMA)
+    schemas: ${DB_SCHEMA:public}
+    default-schema: ${DB_SCHEMA:public}
+    locations: classpath:db/migration
+  lifecycle:
+    # o Render espera até 30 s pelo encerramento; finalizamos antes disso
+    timeout-per-shutdown-phase: 20s
+
+server:
+  port: ${PORT:8080}
+  shutdown: graceful
+  # respeita os cabeçalhos X-Forwarded-* do proxy HTTPS do Render (links e Swagger com https)
+  forward-headers-strategy: framework
+  tomcat:
+    threads:
+      max: ${SERVER_MAX_THREADS:50}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-components: always
+      probes:
+        enabled: true
+      group:
+        # readiness só fica UP quando o banco responde (usado no health check do Render e do Compose)
+        readiness:
+          include: readinessState,db
+  info:
+    env:
+      enabled: true
+    java:
+      enabled: true
+
+info:
+  aplicacao:
+    nome: ${app.nome}
+    ambiente: ${app.ambiente}
+    commit: ${app.commit}
+
+app:
+  nome: Cidades ESG Inteligentes
+  ambiente: ${APP_ENV:local}
+  # no Render, RENDER_GIT_COMMIT é preenchido automaticamente; na imagem Docker, APP_COMMIT vem do build
+  commit: ${RENDER_GIT_COMMIT:${APP_COMMIT:local}}
+  pesos:
+    ambiental: 0.4
+    social: 0.3
+    governanca: 0.3
+
+springdoc:
+  api-docs:
+    enabled: ${SWAGGER_ENABLED:true}
+    path: /v3/api-docs
+  swagger-ui:
+    enabled: ${SWAGGER_ENABLED:true}
+    path: /swagger-ui.html
+    tags-sorter: alpha
+    display-request-duration: true
+
+logging:
+  file:
+    # vazio = somente console; no Docker Compose aponta para o volume /app/logs
+    name: ${LOG_FILE:}
+  level:
+    root: INFO
+    br.com.fiap.cidadesesg: ${LOG_LEVEL_APP:INFO}

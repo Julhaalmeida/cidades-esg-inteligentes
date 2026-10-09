@@ -1,0 +1,9 @@
+# Perfil de STAGING (homologação): mais detalhes para investigar problemas antes da produção.
+logging:
+  level:
+    br.com.fiap.cidadesesg: DEBUG
+
+management:
+  endpoint:
+    health:
+      show-details: always

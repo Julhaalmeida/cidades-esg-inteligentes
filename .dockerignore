@@ -1,0 +1,17 @@
+# Arquivos que NÃO vão para o contexto de build da imagem:
+# deixam o build mais rápido e evitam copiar segredos (.env) para dentro da imagem.
+.git
+.github
+.idea
+.vscode
+*.iml
+target
+logs
+docs
+envs
+scripts
+*.md
+.env
+.env.*
+docker-compose*.yml
+render.yaml

@@ -1,0 +1,264 @@
+# =============================================================================
+# Pipeline CI/CD - Cidades ESG Inteligentes
+#
+#   🔨 Build ──▶ 🧪 Testes ──▶ 🐳 Docker ──▶ 🚀 Staging ──▶ (aprovação) ──▶ ✅ Produção
+#
+# - Pull request para a main: roda Build, Testes e Docker (sem deploy).
+# - Push na main (ou execução manual): roda tudo e publica em staging; depois de
+#   passar nos smoke tests de staging, publica em produção (com aprovação manual,
+#   se o ambiente "production" tiver revisores obrigatórios no GitHub).
+# =============================================================================
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Em PRs, um novo push cancela a execução anterior; na main cada execução segue até o fim.
+concurrency:
+  group: ${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('run-{0}', github.run_id) }}
+  cancel-in-progress: true
+
+env:
+  JAVA_VERSION: "21"
+
+jobs:
+
+  build:
+    name: 🔨 Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Baixar o código
+        uses: actions/checkout@v7
+
+      - name: Configurar Java ${{ env.JAVA_VERSION }} (Temurin) com cache do Maven
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: maven
+
+      - name: Compilar e empacotar o JAR
+        run: |
+          chmod +x mvnw
+          ./mvnw -B -ntp package -DskipTests
+
+      - name: Guardar o JAR como artefato da execução
+        uses: actions/upload-artifact@v7
+        with:
+          name: cidades-esg-jar
+          path: target/cidades-esg.jar
+          retention-days: 7
+
+  test:
+    name: 🧪 Testes
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      checks: write          # publica o relatório de testes como "check" do commit
+    services:
+      # PostgreSQL real e descartável para os testes de integração
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: cidades_esg_test
+          POSTGRES_USER: esg
+          POSTGRES_PASSWORD: esg_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U esg -d cidades_esg_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      DB_HOST: localhost
+      DB_PORT: "5432"
+      DB_NAME: cidades_esg_test
+      DB_USER: esg
+      DB_PASSWORD: esg_ci
+    steps:
+      - name: Baixar o código
+        uses: actions/checkout@v7
+
+      - name: Configurar Java ${{ env.JAVA_VERSION }} (Temurin) com cache do Maven
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: maven
+
+      - name: Testes unitários e de integração
+        run: |
+          chmod +x mvnw
+          ./mvnw -B -ntp verify
+
+      - name: Publicar o resultado dos testes
+        if: always()
+        uses: mikepenz/action-junit-report@v6
+        with:
+          report_paths: target/*-reports/TEST-*.xml
+          check_name: Resultado dos testes
+          include_passed: true
+          detailed_summary: true
+          require_tests: true
+
+      - name: Resumo da cobertura de testes (JaCoCo)
+        if: always()
+        run: |
+          CSV=target/site/jacoco/jacoco.csv
+          if [ -f "$CSV" ]; then
+            awk -F, 'NR > 1 { bm += $6; bc += $7; lm += $8; lc += $9 }
+              END {
+                printf "### 📊 Cobertura de testes (JaCoCo)\n\n| Métrica | Cobertura |\n|---|---|\n"
+                printf "| Linhas | %.1f%% (%d de %d) |\n", (lc + lm) ? 100 * lc / (lc + lm) : 0, lc, lc + lm
+                printf "| Desvios (branches) | %.1f%% (%d de %d) |\n", (bc + bm) ? 100 * bc / (bc + bm) : 0, bc, bc + bm
+              }' "$CSV" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Guardar relatórios de testes e cobertura
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: relatorios-de-teste
+          path: |
+            target/surefire-reports/
+            target/failsafe-reports/
+            target/site/jacoco/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  docker:
+    name: 🐳 Docker
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      packages: write        # publica a imagem no GitHub Container Registry
+    env:
+      # usados pelo docker compose (prevalecem sobre o arquivo .env)
+      APP_IMAGE: cidades-esg-inteligentes:ci
+      APP_ENV: ci
+    steps:
+      - name: Baixar o código
+        uses: actions/checkout@v7
+
+      - name: Preparar o Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Definir as tags da imagem
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=sha,format=short,prefix=sha-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build da imagem (Dockerfile multi-stage)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          load: true
+          tags: ${{ env.APP_IMAGE }}
+          build-args: GIT_COMMIT=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Subir aplicação + PostgreSQL com Docker Compose
+        run: |
+          cp .env.example .env
+          docker compose up -d --no-build --wait --wait-timeout 240
+          docker compose ps
+
+      - name: Smoke tests no ambiente do Compose
+        run: bash scripts/smoke-test.sh http://localhost:8080 ci --escrita
+
+      - name: Logs dos containers (se algo falhar)
+        if: failure()
+        run: docker compose logs --no-color
+
+      - name: Derrubar o ambiente do Compose
+        if: always()
+        run: docker compose down -v
+
+      - name: Login no GitHub Container Registry
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publicar a imagem versionada no GHCR
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: GIT_COMMIT=${{ github.sha }}
+          cache-from: type=gha
+
+  deploy-staging:
+    name: 🚀 Deploy Staging
+    needs: docker
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: staging
+      url: ${{ vars.STAGING_URL }}
+    concurrency:
+      group: deploy-staging
+      cancel-in-progress: false
+    env:
+      APP_URL: ${{ vars.STAGING_URL }}
+    steps:
+      - name: Baixar o código
+        uses: actions/checkout@v7
+
+      - name: Deploy no Render (staging)
+        env:
+          RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_STAGING }}
+        run: bash scripts/render-deploy.sh staging "$GITHUB_SHA"
+
+      - name: Smoke tests em staging (leitura e escrita)
+        run: bash scripts/smoke-test.sh "$APP_URL" staging --escrita
+
+  deploy-production:
+    name: ✅ Deploy Produção
+    needs: deploy-staging
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: production        # configure "Required reviewers" para exigir aprovação
+      url: ${{ vars.PRODUCTION_URL }}
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    env:
+      APP_URL: ${{ vars.PRODUCTION_URL }}
+    steps:
+      - name: Baixar o código
+        uses: actions/checkout@v7
+
+      - name: Deploy no Render (produção)
+        env:
+          RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_PRODUCTION }}
+        run: bash scripts/render-deploy.sh production "$GITHUB_SHA"
+
+      - name: Smoke tests em produção (somente leitura)
+        run: bash scripts/smoke-test.sh "$APP_URL" production

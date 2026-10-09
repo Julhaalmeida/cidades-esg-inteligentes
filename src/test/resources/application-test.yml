@@ -1,0 +1,8 @@
+# Perfil usado pelos testes de integração (*IT.java).
+# O banco vem das variáveis DB_* (no GitHub Actions, do service container PostgreSQL).
+app:
+  ambiente: teste
+
+logging:
+  level:
+    br.com.fiap.cidadesesg: DEBUG

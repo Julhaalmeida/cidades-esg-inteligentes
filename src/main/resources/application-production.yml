@@ -1,0 +1,15 @@
+# Perfil de PRODUÇÃO: logs enxutos e nenhum detalhe interno exposto no health check.
+logging:
+  level:
+    br.com.fiap.cidadesesg: INFO
+    org.hibernate: WARN
+
+management:
+  endpoint:
+    health:
+      show-details: never
+
+server:
+  error:
+    include-stacktrace: never
+    include-message: never

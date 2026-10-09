@@ -1,0 +1,11 @@
+# Normaliza finais de linha: scripts precisam de LF para rodar no Linux (Docker, GitHub Actions, Render)
+* text=auto eol=lf
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# Binários
+*.png binary
+*.jpg binary
+*.pptx binary
+*.pdf binary
+*.jar binary

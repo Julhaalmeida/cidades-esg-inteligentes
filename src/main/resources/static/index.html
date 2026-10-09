@@ -1,0 +1,311 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cidades ESG Inteligentes</title>
+  <meta name="description" content="API de indicadores ESG para cidades inteligentes: ranking, score e ambiente em execução.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Overpass:wght@400;600;800&family=Overpass+Mono:wght@500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      color-scheme: light;
+      --fundo: #f3f6f4;
+      --papel: #ffffff;
+      --tinta: #18241e;
+      --tinta-suave: #4a5852;
+      --linha: #d9e1dc;
+      --trilho: #e7ece9;
+      --pilar-e: #2e8a57;
+      --pilar-s: #c98a17;
+      --pilar-g: #2f62b3;
+      --ok: #1f7a45;
+      --falha: #b42318;
+      --ambiente-fundo: #3c4654;
+      --ambiente-tinta: #ffffff;
+      --ambiente-suave: rgba(255, 255, 255, 0.78);
+      --fonte: "Overpass", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      --fonte-codigo: "Overpass Mono", ui-monospace, "SFMono-Regular", Consolas, monospace;
+    }
+    /* A cor da faixa superior identifica o ambiente: impossível confundir staging com produção */
+    body[data-ambiente="staging"] {
+      --ambiente-fundo: #f2b632;
+      --ambiente-tinta: #2b1d00;
+      --ambiente-suave: rgba(43, 29, 0, 0.78);
+    }
+    body[data-ambiente="production"] {
+      --ambiente-fundo: #173d2c;
+      --ambiente-tinta: #ffffff;
+      --ambiente-suave: rgba(255, 255, 255, 0.8);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--fundo);
+      color: var(--tinta);
+      font-family: var(--fonte);
+      font-size: 1rem;
+      line-height: 1.55;
+    }
+    a { color: var(--pilar-g); text-underline-offset: 3px; }
+    a:focus-visible { outline: 3px solid var(--pilar-g); outline-offset: 3px; border-radius: 2px; }
+    .conteudo { max-width: 68rem; margin: 0 auto; padding: 0 1.25rem; }
+
+    .ambiente { background: var(--ambiente-fundo); color: var(--ambiente-tinta); }
+    .ambiente .conteudo {
+      display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between;
+      gap: 1.5rem 3rem; padding-top: 2.25rem; padding-bottom: 2rem;
+    }
+    .ambiente-nome {
+      margin: 0; font-size: clamp(2.6rem, 7vw, 4.5rem); font-weight: 800;
+      line-height: 0.95; letter-spacing: -0.02em;
+    }
+    .ambiente-descricao { margin: 0.6rem 0 0; max-width: 34rem; color: var(--ambiente-suave); }
+    .versao { display: flex; flex-wrap: wrap; gap: 0.25rem 2rem; margin: 0; }
+    .versao div { min-width: 6rem; }
+    .versao dt { font-size: 0.85rem; color: var(--ambiente-suave); }
+    .versao dd { margin: 0; font-weight: 600; font-size: 1.1rem; }
+    .versao code { font-family: var(--fonte-codigo); font-size: 1.05rem; }
+
+    main.conteudo { padding-top: 2.5rem; padding-bottom: 3.5rem; }
+    h1 { margin: 0 0 0.4rem; font-size: 2rem; font-weight: 800; letter-spacing: -0.01em; line-height: 1.15; }
+    h2 { margin: 0 0 0.25rem; font-size: 1.35rem; font-weight: 800; }
+    .apresentacao { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 1rem 2.5rem; align-items: end; margin-bottom: 2.5rem; }
+    .apresentacao p { margin: 0; max-width: 40rem; color: var(--tinta-suave); }
+    .saude { list-style: none; margin: 0; padding: 0; display: flex; gap: 1.25rem; flex-wrap: wrap; }
+    .saude li { display: flex; align-items: center; gap: 0.45rem; font-weight: 600; white-space: nowrap; }
+    .saude .marcador { width: 0.7rem; height: 0.7rem; border-radius: 50%; background: var(--linha); flex: none; }
+    .saude [data-estado="ok"] .marcador { background: var(--ok); }
+    .saude [data-estado="falha"] .marcador { background: var(--falha); }
+
+    .ranking-cabecalho { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 0.5rem 2rem; margin-bottom: 1rem; }
+    .ranking-cabecalho p { margin: 0; color: var(--tinta-suave); font-size: 0.95rem; max-width: 40rem; }
+    .tabela-rolagem { overflow-x: auto; background: var(--papel); border: 1px solid var(--linha); border-radius: 6px; }
+    table { width: 100%; border-collapse: collapse; min-width: 44rem; }
+    th, td { padding: 0.8rem 1rem; text-align: left; vertical-align: middle; }
+    thead th { font-size: 0.85rem; font-weight: 600; color: var(--tinta-suave); border-bottom: 1px solid var(--linha); }
+    tbody tr + tr td { border-top: 1px solid var(--trilho); }
+    .posicao { width: 3rem; font-weight: 800; color: var(--tinta-suave); font-variant-numeric: tabular-nums; }
+    .cidade { font-weight: 600; }
+    .cidade small { display: block; font-weight: 400; color: var(--tinta-suave); }
+    .pilar-titulo { display: inline-flex; align-items: center; gap: 0.4rem; }
+    .pilar-titulo::before { content: ""; width: 0.65rem; height: 0.65rem; border-radius: 2px; background: var(--cor); }
+    .medidor { display: grid; grid-template-columns: minmax(4rem, 1fr) 2.6rem; align-items: center; gap: 0.6rem; min-width: 8.5rem; }
+    .trilho { height: 0.5rem; background: var(--trilho); border-radius: 4px; overflow: hidden; }
+    .barra { display: block; height: 100%; width: var(--valor); background: var(--cor); border-radius: 0 4px 4px 0; }
+    .medidor-valor { font-variant-numeric: tabular-nums; text-align: right; font-size: 0.95rem; }
+    .score { white-space: nowrap; padding-right: 1.75rem; }
+    .score-numero { font-size: 1.35rem; font-weight: 800; font-variant-numeric: tabular-nums; margin-right: 0.5rem; }
+    .classe { display: inline-flex; align-items: baseline; gap: 0.35rem; padding: 0.1rem 0.55rem; border-radius: 4px; font-size: 0.9rem; background: var(--trilho); }
+    .classe b { font-weight: 800; }
+    .classe[data-classe="A"] { background: #dcefe3; }
+    .classe[data-classe="B"] { background: #e3ecf8; }
+    .classe[data-classe="C"] { background: #f6ead2; }
+    .classe[data-classe="D"] { background: #f8dcd9; }
+    .mensagem { padding: 1.5rem 1rem; color: var(--tinta-suave); }
+
+    .explorar { margin-top: 2.75rem; }
+    .explorar ul { list-style: none; padding: 0; margin: 0.75rem 0 0; display: flex; flex-wrap: wrap; gap: 0.6rem 1.75rem; }
+    .explorar a { font-weight: 600; }
+    footer { border-top: 1px solid var(--linha); color: var(--tinta-suave); font-size: 0.9rem; }
+    footer .conteudo { padding-top: 1.25rem; padding-bottom: 2rem; }
+    .oculto { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+    @media (max-width: 40rem) {
+      .apresentacao { grid-template-columns: 1fr; }
+      h1 { font-size: 1.6rem; }
+    }
+  </style>
+</head>
+<body data-ambiente="local">
+  <header class="ambiente">
+    <div class="conteudo">
+      <div>
+        <p class="ambiente-nome" id="ambiente-nome">Carregando…</p>
+        <p class="ambiente-descricao" id="ambiente-descricao">Identificando o ambiente em execução.</p>
+      </div>
+      <dl class="versao">
+        <div><dt>Versão</dt><dd id="versao">–</dd></div>
+        <div><dt>Commit</dt><dd><code id="commit">–</code></dd></div>
+        <div><dt>No ar desde</dt><dd id="inicio">–</dd></div>
+      </dl>
+    </div>
+  </header>
+
+  <main class="conteudo">
+    <section class="apresentacao" aria-labelledby="titulo">
+      <div>
+        <h1 id="titulo">Cidades ESG Inteligentes</h1>
+        <p>Indicadores ambientais, sociais e de governança de cidades brasileiras, convertidos em um score ESG de 0 a 100.</p>
+      </div>
+      <ul class="saude" id="saude" aria-label="Situação dos serviços">
+        <li data-estado="carregando" id="saude-api"><span class="marcador" aria-hidden="true"></span><span>API: verificando</span></li>
+        <li data-estado="carregando" id="saude-banco"><span class="marcador" aria-hidden="true"></span><span>Banco de dados: verificando</span></li>
+      </ul>
+    </section>
+
+    <section aria-labelledby="titulo-ranking">
+      <div class="ranking-cabecalho">
+        <h2 id="titulo-ranking">Ranking ESG</h2>
+        <p>Score geral: média ponderada de Ambiental (40%), Social (30%) e Governança (30%), usando a medição mais recente de cada indicador. Os dados de exemplo são ilustrativos.</p>
+      </div>
+      <div class="tabela-rolagem">
+        <table>
+          <caption class="oculto">Ranking das cidades pelo score ESG, com a nota de cada dimensão de 0 a 100</caption>
+          <thead>
+            <tr>
+              <th scope="col">Posição</th>
+              <th scope="col">Cidade</th>
+              <th scope="col">Score geral</th>
+              <th scope="col"><span class="pilar-titulo" style="--cor: var(--pilar-e)">Ambiental</span></th>
+              <th scope="col"><span class="pilar-titulo" style="--cor: var(--pilar-s)">Social</span></th>
+              <th scope="col"><span class="pilar-titulo" style="--cor: var(--pilar-g)">Governança</span></th>
+            </tr>
+          </thead>
+          <tbody id="ranking">
+            <tr><td colspan="6" class="mensagem">Carregando o ranking…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="explorar" aria-labelledby="titulo-explorar">
+      <h2 id="titulo-explorar">Explorar a API</h2>
+      <ul>
+        <li><a href="swagger-ui.html">Documentação interativa (Swagger)</a></li>
+        <li><a href="api/ranking">Ranking em JSON</a></li>
+        <li><a href="api/indicadores/tipos">Catálogo de indicadores</a></li>
+        <li><a href="api/info">Versão em execução</a></li>
+        <li><a href="actuator/health">Health check</a></li>
+      </ul>
+    </section>
+  </main>
+
+  <footer>
+    <div class="conteudo">Projeto acadêmico de DevOps: pipeline CI/CD com GitHub Actions, Docker e deploy em staging e produção.</div>
+  </footer>
+
+  <script>
+    const AMBIENTES = {
+      local: { nome: "Local", descricao: "Execução local com Docker Compose." },
+      staging: { nome: "Staging", descricao: "Homologação: cada nova versão é validada aqui antes de ir para produção." },
+      production: { nome: "Produção", descricao: "Ambiente de produção, liberado após a aprovação no pipeline." },
+      teste: { nome: "Teste", descricao: "Instância usada pelos testes automatizados." }
+    };
+    const PILARES = [
+      { chave: "AMBIENTAL", nome: "Ambiental", cor: "var(--pilar-e)" },
+      { chave: "SOCIAL", nome: "Social", cor: "var(--pilar-s)" },
+      { chave: "GOVERNANCA", nome: "Governança", cor: "var(--pilar-g)" }
+    ];
+    const formatoNota = new Intl.NumberFormat("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+    const formatoData = new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short" });
+
+    function elemento(tag, propriedades = {}, filhos = []) {
+      const el = document.createElement(tag);
+      Object.entries(propriedades).forEach(([chave, valor]) => {
+        if (chave === "texto") el.textContent = valor;
+        else if (chave === "estilo") Object.entries(valor).forEach(([p, v]) => el.style.setProperty(p, v));
+        else el.setAttribute(chave, valor);
+      });
+      filhos.forEach((filho) => el.append(filho));
+      return el;
+    }
+
+    async function buscarJson(caminho) {
+      const resposta = await fetch(caminho, { headers: { Accept: "application/json" } });
+      if (!resposta.ok) throw new Error(caminho + " respondeu " + resposta.status);
+      return resposta.json();
+    }
+
+    function marcarSaude(id, estado, texto) {
+      const item = document.getElementById(id);
+      item.dataset.estado = estado;
+      item.lastElementChild.textContent = texto;
+    }
+
+    async function carregarInfo() {
+      try {
+        const info = await buscarJson("api/info");
+        const ambiente = AMBIENTES[info.ambiente] || { nome: info.ambiente, descricao: "Ambiente personalizado." };
+        document.body.dataset.ambiente = info.ambiente;
+        document.getElementById("ambiente-nome").textContent = ambiente.nome;
+        document.getElementById("ambiente-descricao").textContent = ambiente.descricao;
+        document.getElementById("versao").textContent = info.versao;
+        document.getElementById("commit").textContent = info.commit;
+        document.getElementById("inicio").textContent = formatoData.format(new Date(info.inicializadoEm));
+        document.title = ambiente.nome + " | Cidades ESG Inteligentes";
+      } catch (erro) {
+        document.getElementById("ambiente-nome").textContent = "Ambiente desconhecido";
+        document.getElementById("ambiente-descricao").textContent = "Não foi possível ler /api/info. Confira os logs da aplicação.";
+      }
+    }
+
+    async function carregarSaude() {
+      try {
+        const resposta = await fetch("actuator/health", { headers: { Accept: "application/json" } });
+        const saude = await resposta.json();
+        const banco = saude.components && saude.components.db ? saude.components.db.status : "UNKNOWN";
+        marcarSaude("saude-api", saude.status === "UP" ? "ok" : "falha", saude.status === "UP" ? "API: no ar" : "API: com falha (" + saude.status + ")");
+        marcarSaude("saude-banco", banco === "UP" ? "ok" : "falha", banco === "UP" ? "Banco de dados: conectado" : "Banco de dados: indisponível");
+      } catch (erro) {
+        marcarSaude("saude-api", "falha", "API: sem resposta do health check");
+        marcarSaude("saude-banco", "falha", "Banco de dados: não verificado");
+      }
+    }
+
+    function medidor(pilar, nota) {
+      if (nota === null || nota === undefined) {
+        return elemento("span", { class: "medidor-valor", texto: "sem dados" });
+      }
+      const texto = formatoNota.format(nota);
+      return elemento("div", { class: "medidor", title: pilar.nome + ": " + texto + " de 100" }, [
+        elemento("span", { class: "trilho", "aria-hidden": "true" }, [
+          elemento("span", { class: "barra", estilo: { "--valor": Math.max(0, Math.min(100, nota)) + "%", "--cor": pilar.cor } })
+        ]),
+        elemento("span", { class: "medidor-valor", texto })
+      ]);
+    }
+
+    async function carregarRanking() {
+      const corpo = document.getElementById("ranking");
+      try {
+        const ranking = await buscarJson("api/ranking");
+        if (ranking.length === 0) {
+          corpo.replaceChildren(elemento("tr", {}, [elemento("td", { colspan: "6", class: "mensagem",
+            texto: "Nenhuma cidade cadastrada ainda. Cadastre a primeira pelo Swagger, em POST /api/cidades." })]));
+          return;
+        }
+        const scores = await Promise.all(ranking.map((item) =>
+          buscarJson("api/cidades/" + item.cidadeId + "/score").catch(() => null)));
+        const linhas = ranking.map((item, i) => {
+          const dimensoes = scores[i] ? scores[i].dimensoes : {};
+          const celulaScore = item.scoreGeral === null
+            ? elemento("td", { class: "score", texto: "sem dados" })
+            : elemento("td", { class: "score" }, [
+                elemento("span", { class: "score-numero", texto: formatoNota.format(item.scoreGeral) }),
+                elemento("span", { class: "classe", "data-classe": item.classificacao }, [
+                  elemento("b", { texto: item.classificacao }),
+                  elemento("span", { texto: item.descricaoClassificacao })
+                ])
+              ]);
+          return elemento("tr", {}, [
+            elemento("td", { class: "posicao", texto: item.posicao + "º" }),
+            elemento("td", { class: "cidade" }, [document.createTextNode(item.cidade), elemento("small", { texto: item.uf })]),
+            celulaScore,
+            ...PILARES.map((pilar) => elemento("td", {}, [medidor(pilar, dimensoes[pilar.chave])]))
+          ]);
+        });
+        corpo.replaceChildren(...linhas);
+      } catch (erro) {
+        corpo.replaceChildren(elemento("tr", {}, [elemento("td", { colspan: "6", class: "mensagem",
+          texto: "Não foi possível carregar o ranking agora. Confira o health check e os logs da aplicação." })]));
+      }
+    }
+
+    carregarInfo();
+    carregarSaude();
+    carregarRanking();
+  </script>
+</body>
+</html>
